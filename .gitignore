@@ -348,3 +348,7 @@ vcpkg_installed
 .stfolder/
 .stignore
 
+
+# W10M local build output
+build-tmp/
+build-logs/
