@@ -53,8 +53,8 @@ Even with MSBuild working, try_compile built an EXE and the UWP packaging
 targets tried to sign `Windows_TemporaryKey.pfx`:
 
 ```text
-无法打开证书: Windows_TemporaryKey.pfx
-指定的网络密码不正确
+鏃犳硶鎵撳紑璇佷功: Windows_TemporaryKey.pfx
+鎸囧畾鐨勭綉缁滃瘑鐮佷笉姝ｇ‘
 ```
 
 Fixed by passing, before `project()`:
@@ -233,3 +233,97 @@ commit 59b747d
 artifact moonlight-w10m-1.18.3
 ```
 
+
+## 2026-11-11 - activation failure: desktop-CRT dependency DLLs
+
+The app installed but never started: no splash, no `app.log`, no dump, and the
+Device Portal reported `E_APPLICATION_ACTIVATION_EXEC_FAILURE` (0x8027025B) with
+`TYPE_E_ELEMENTNOTFOUND` (0x8002802B) during the activation prerequisite phase.
+ETW (`Microsoft-Windows-AppModel-Exec` / `Kernel-Process` / `User-Loader`)
+showed that no image was ever loaded, so nothing in the app ran.
+
+Root cause: the packaged dependency DLLs were built against the **desktop** CRT
+(`VCRUNTIME140.dll`), while the UWP app imports `VCRUNTIME140_APP.dll`. Inside
+the app container the desktop CRT is unavailable, so loading the statically
+imported DLLs fails before any code runs.
+
+Evidence:
+
+```text
+working dependency set (2026-11-07): 17/17 DLLs import VCRUNTIME140_APP.dll
+broken  dependency set (2026-11-10): 17/17 DLLs import VCRUNTIME140.dll
+app exe (both builds):              imports VCRUNTIME140_APP / vccorlib140_app
+```
+
+Working-tree fixes:
+
+1. Restore the moonlight-xbox ffmpeg overlay port (`vcpkg-overlays/ports/ffmpeg`).
+   It is the stock vcpkg port plus the upstream Xbox retry patch
+   (`9900-check-d3derr-wasstilldrawing.patch`) and a W10M UWP configure branch
+   that keeps only `--enable-d3d11va` (no mediafoundation/dxva2/d3d12va on 15063).
+2. Build dependencies release-only (`set(VCPKG_BUILD_TYPE release)` in the
+   overlay triplet); the debug UWP ARM link fails on `/RTC1`.
+3. Verify the CRT flavor of every packaged DLL before shipping. A single DLL
+   importing `VCRUNTIME140.dll` is enough to make activation fail.
+
+Resolution (2026-11-11, verified from a clean tree): the UWP CRT import
+libraries live in `VC\Tools\MSVC\<version>\lib\arm\store`; the desktop ones in
+`lib\arm`. The linker searches `/LIBPATH` before `%LIB%`, and the overlay
+triplet passed `/LIBPATH:V:/lib/arm` only, so every link resolved vcruntime.lib
+to the desktop import library. Putting `/LIBPATH:V:/lib/arm/store` first (and
+prepending the same directory to `%LIB%` in `build-w10m.ps1`) makes all
+dependencies link `VCRUNTIME140_APP.dll` - a clean from-zero rebuild now yields
+17/17 UWP dependency DLLs.
+
+`build-w10m.ps1` now also removes stale staged dependency DLLs before MSBuild
+(copies are timestamp-based) and fails the build if any packaged DLL imports the
+desktop CRT.
+
+## 2026-11-12 - Host settings crash: ComboBox.SelectedIndex before the page is live
+
+Tapping a host and choosing its settings killed the app on the phone. `app.log`
+shows the page constructor completing and then stops mid-population:
+
+```text
+[01:03:14.219] [HostSettings] ctor: begin (before InitializeComponent)
+[01:03:14.245] [HostSettings] ctor: InitializeComponent ok
+[01:03:14.257] [HostSettings] OnNavigatedTo: begin
+[01:03:06.880] Hello from Moonlight!          <- next process start
+```
+
+The dump (`moonlight-xbox-dx.exe.4312.dmp`, 01:03) carries a WinRT stowed
+exception with `ResultCode = 0x80070057` (`E_INVALIDARG`) and this stack:
+
+```text
+KERNELBASE!RaiseException
+  <- __abi_WinRTraiseException
+  <- HostSettingsPage::OnNavigatedTo+0x1103   [hostsettingspage.xaml.cpp:119]
+  <- [IPageOverrides]::OnNavigatedTo
+  <- Frame::Navigate
+  <- HostSelectorPage::hostSettingsButton_Click
+```
+
+Line 119 was `FramePacingComboBox->SelectedIndex = i;`. `state.json` stores
+`"framePacing":"Immediate"`, so the loop matched index 0 and executed the
+assignment while the page was still in `OnNavigatedTo`. On 15254 a ComboBox whose
+`ItemsSource` was assigned by `x:Bind` has not built its `Items` collection yet
+at that point, so index 0 is out of range and the setter returns
+`E_INVALIDARG`; C++/CX turns that into an unhandled exception and the process
+dies.
+
+The three saved selections (frame pacing, audio buffer, packet size) are now
+applied in `OnLoaded` (`ApplySavedSelections`), each guarded against
+`Items->Size`, and wrapped in a `Platform::Exception` handler that logs instead
+of crashing. Log lines `framePacing/audioBuffer/packetSize: selected N of M`
+confirm the realized item counts on the device.
+
+Lesson: on 15254, never write `ComboBox.SelectedIndex` before `Loaded`; the
+`ItemsSource`-bound `Items` view is still empty and any index is rejected.
+
+
+## Device Portal access
+
+All of the evidence above comes from the Device Portal REST API. The procedure
+(cookie/CSRF handling, the token rotation trap, the `utf-8-sig` BOM trap, the
+ETW WebSocket `Origin` header, and the multipart install request) is documented
+in [DEVICE-PORTAL.md](DEVICE-PORTAL.md).

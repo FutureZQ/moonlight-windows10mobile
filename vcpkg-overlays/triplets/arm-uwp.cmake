@@ -1,11 +1,11 @@
-set(VCPKG_TARGET_ARCHITECTURE arm)
+﻿set(VCPKG_TARGET_ARCHITECTURE arm)
 set(VCPKG_CRT_LINKAGE dynamic)
 set(VCPKG_LIBRARY_LINKAGE dynamic)
 set(VCPKG_CMAKE_SYSTEM_NAME WindowsStore)
 set(VCPKG_CMAKE_SYSTEM_VERSION 10.0.15063)
 set(VCPKG_PLATFORM_TOOLSET v143)
 set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
-set(VCPKG_LINKER_FLAGS "/NODEFAULTLIB:volatileaccessu.lib /LIBPATH:W:/lib/10.0.15063.0/ucrt/arm /LIBPATH:W:/lib/10.0.15063.0/um/arm /LIBPATH:V:/lib/arm crypt32.lib ws2_32.lib gdi32.lib user32.lib kernel32.lib advapi32.lib")
+set(VCPKG_LINKER_FLAGS "/NODEFAULTLIB:volatileaccessu.lib /LIBPATH:W:/lib/10.0.15063.0/ucrt/arm /LIBPATH:W:/lib/10.0.15063.0/um/arm /LIBPATH:V:/lib/arm/store /LIBPATH:V:/lib/arm crypt32.lib ws2_32.lib gdi32.lib user32.lib kernel32.lib advapi32.lib")
 get_filename_component(W10M_REPO_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
 set(VCPKG_C_FLAGS "-I\"${W10M_REPO_ROOT}/w10m-compat/sdkcompat\" /wd4703 /wd4146")
 set(VCPKG_CXX_FLAGS "-I\"${W10M_REPO_ROOT}/w10m-compat/sdkcompat\" /wd4703 /wd4146")
@@ -17,3 +17,7 @@ set(VCPKG_CMAKE_CONFIGURE_OPTIONS
     "-DCMAKE_C_COMPILER_FORCED=1"
     "-DCMAKE_CXX_COMPILER_FORCED=1"
     "-DCMAKE_SIZEOF_VOID_P=4")
+
+# W10M: release-only dependency builds (debug UWP ARM links fail on /RTC1)
+set(VCPKG_BUILD_TYPE release)
+

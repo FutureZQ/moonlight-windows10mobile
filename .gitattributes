@@ -64,3 +64,9 @@
 
 # Submodule patches must keep LF so git apply works on every checkout.
 patches/*.patch -text
+vcpkg-overlays/**/*.patch -text
+vcpkg-overlays/**/*.diff -text
+vcpkg-overlays/ffmpeg/*.patch -text
+vcpkg-overlays/ports/ffmpeg/*.patch -text
+vcpkg-overlays/ffmpeg/*.diff -text
+vcpkg-overlays/ports/ffmpeg/*.diff -text

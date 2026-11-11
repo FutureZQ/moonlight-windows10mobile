@@ -408,6 +408,26 @@ jobs:
           } else {
             Write-Output '::error::build_and_package_Appx.raw.log not found'
           }
+          # The one-shot script can fail before the Appx step. Annotations are
+          # capped, so print only the diagnostic lines from each stage log.
+          $stageLogs = @(
+            'build-logs\install_vcpkg_dependencies.raw.log',
+            'build-logs\generate_third-party_projects.raw.log',
+            'build-logs\build_moonlight-common-c_and_enet.raw.log',
+            'build-logs\build_gamestream.raw.log',
+            'build-logs\build_and_package_Appx.raw.log'
+          )
+          foreach ($rel in $stageLogs) {
+            if (-not (Test-Path $rel)) { continue }
+            Write-Output "::error::=== $rel ==="
+            $hits = Select-String -Path $rel -Pattern 'error|Error|FAILED|fatal|not found|cannot|CMake Error' -ErrorAction SilentlyContinue |
+              Select-Object -First 12
+            foreach ($h in $hits) {
+              $line = $h.Line.Trim()
+              if ($line.Length -gt 220) { $line = $line.Substring(0, 220) }
+              Write-Output "::error::$line"
+            }
+          }
 
       - name: Upload one-shot build logs on failure
         if: failure()

@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     One-shot build for the Windows 10 Mobile Moonlight UWP app.
 
@@ -153,6 +153,7 @@ $VcpkgLines = @(
     'set "INCLUDE=C:\Program Files (x86)\Windows Kits\10\include\10.0.15063.0\ucrt;C:\Program Files (x86)\Windows Kits\10\include\10.0.15063.0\shared;C:\Program Files (x86)\Windows Kits\10\include\10.0.15063.0\um;%INCLUDE%"',
     'set "LIB=C:\Program Files (x86)\Windows Kits\10\lib\10.0.15063.0\ucrt\arm;C:\Program Files (x86)\Windows Kits\10\lib\10.0.15063.0\um\arm;%LIB%"',
     "set `"LIB=%LIB%;$VCToolsLib`"",
+    "set `"LIB=$($VCToolsRoot.FullName)\lib\arm\store;%LIB%`"",
     "`"$Root\vcpkg\vcpkg.exe`" install --triplet arm-uwp --overlay-triplets `"$Root\vcpkg-overlays\triplets`" --overlay-ports=`"$Root\vcpkg-overlays\ports`" --x-buildtrees-root=`"$BuildTreesRoot`" --binarysource=clear"
 )
 Set-Content -Path $VcpkgScript -Value $VcpkgLines -Encoding Ascii
@@ -180,6 +181,15 @@ $GamestreamCommand = (
 Invoke-Checked $GamestreamCommand 'build gamestream'
 
 $MSBuildScript = Join-Path $BuildTemp 'run-msbuild.cmd'
+# Drop stale dependency DLLs staged by earlier builds: MSBuild copies by
+# timestamp, so desktop-CRT leftovers from an older toolchain configuration
+# would otherwise be repackaged unchanged.
+$StageDir = Join-Path $Root 'ARM\Release\moonlight-xbox-dx'
+if (Test-Path $StageDir) {
+    Get-ChildItem $StageDir -Filter '*.dll' -ErrorAction SilentlyContinue |
+        Where-Object { Test-Path (Join-Path $Root ('vcpkg_installed\arm-uwp\bin\' + $_.Name)) } |
+        Remove-Item -Force
+}
 $MSBuildLines = @(
     '@echo off',
     "call `"$VsDevCmd`" -arch=arm -host_arch=x64 -winsdk=10.0.15063.0",
@@ -192,6 +202,7 @@ $MSBuildLines = @(
     'set "PATH=W:\bin\10.0.15063.0\x64;%PATH%"',
     'set "INCLUDE=C:\Program Files (x86)\Windows Kits\10\include\10.0.15063.0\ucrt;C:\Program Files (x86)\Windows Kits\10\include\10.0.15063.0\shared;C:\Program Files (x86)\Windows Kits\10\include\10.0.15063.0\um;%INCLUDE%"',
     "set `"LIB=C:\Program Files (x86)\Windows Kits\10\lib\10.0.15063.0\ucrt\arm;C:\Program Files (x86)\Windows Kits\10\lib\10.0.15063.0\um\arm;%LIB%;$VCToolsLib`"",
+    "set `"LIB=$($VCToolsRoot.FullName)\lib\arm\store;%LIB%`"",
     "`"$MSBuild`" third_party\DirectXTK\DirectXTK_Windows10_2022.vcxproj -t:Build -p:Configuration=Release -p:Platform=ARM -v:m -nologo",
     "`"$MSBuild`" moonlight-xbox-dx.vcxproj -t:Build -p:Configuration=Release -p:Platform=ARM -p:AppxPackage=true -p:GenerateAppxPackageOnBuild=true -p:AppxBundle=Never -p:AppxBundlePlatforms=ARM -p:UapAppxPackageBuildMode=SideloadOnly -p:AppxGeneratePrisForPortableLibrariesEnabled=false -p:UseDotNetNativeToolchain=false -p:PackageCertificateThumbprint=$CertificateThumbprint -v:m -nologo"
 )
@@ -205,7 +216,39 @@ $Appx = Get-ChildItem (Join-Path $Root 'ARM\Release\AppPackages') -Recurse -Filt
 if (-not $Appx) { Fail 'No .appx was produced' }
 
 Write-Log ''
+# Every packaged dependency DLL must import the UWP (app-container) CRT.
+# A single DLL importing the desktop VCRUNTIME140.dll makes activation fail on
+# the device with E_APPLICATION_ACTIVATION_EXEC_FAILURE (0x8027025B), and the
+# process never starts, so there is no log and no dump to diagnose from.
+$DumpBin = (Get-ChildItem (Join-Path $VsInstallPath 'VC\Tools\MSVC') -Recurse -Filter 'dumpbin.exe' -ErrorAction SilentlyContinue |
+    Where-Object { $_.FullName -match 'Hostx64\\x64' } | Select-Object -First 1).FullName
+if (-not $DumpBin) { Fail 'dumpbin.exe not found in the Visual Studio installation' }
+$GateDir = Join-Path $BuildTemp 'crt-gate'
+if (Test-Path $GateDir) { Remove-Item $GateDir -Recurse -Force }
+New-Item -ItemType Directory -Force $GateDir | Out-Null
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$Zip = [System.IO.Compression.ZipFile]::OpenRead($Appx.FullName)
+$Bad = @()
+try {
+    foreach ($Entry in $Zip.Entries) {
+        if ($Entry.FullName -notmatch '^[^/]+\.dll$') { continue }
+        if ($Entry.FullName -match '^(api-ms|vccorlib|VCRUNTIME|MSVCP|CONCRT|ucrtbase)') { continue }
+        $Path = Join-Path $GateDir $Entry.FullName
+        [System.IO.Compression.ZipFileExtensions]::ExtractToFile($Entry, $Path, $true)
+        $Deps = & $DumpBin /nologo /dependents $Path 2>&1
+        if ($Deps -match 'VCRUNTIME140\.dll') { $Bad += $Entry.FullName }
+    }
+}
+finally {
+    $Zip.Dispose()
+}
+if ($Bad.Count -gt 0) {
+    Fail ('dependency DLLs link the desktop CRT instead of the UWP one: ' + ($Bad -join ', '))
+}
+Write-Log "CRT gate: all packaged dependency DLLs import VCRUNTIME140_APP.dll"
 Write-Log 'BUILD OK'
 Write-Log "APPX: $($Appx.FullName)"
 Write-Log "SIZE: $($Appx.Length)"
 Write-Log "LOG:  $Log"
+
+

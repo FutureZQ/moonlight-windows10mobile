@@ -1,4 +1,4 @@
-﻿//
+//
 // HostSettingsPage.xaml.cpp
 // Implementation of the HostSettingsPage class
 //
@@ -29,7 +29,10 @@ using namespace Windows::UI::Xaml::Navigation;
 
 HostSettingsPage::HostSettingsPage()
 {
+	// Logged before InitializeComponent so a XAML-load crash still leaves a trace.
+	Utils::Log("[HostSettings] ctor: begin (before InitializeComponent)\n");
 	InitializeComponent();
+	Utils::Log("[HostSettings] ctor: InitializeComponent ok\n");
 	Windows::UI::ViewManagement::ApplicationView::GetForCurrentView()->SetDesiredBoundsMode(Windows::UI::ViewManagement::ApplicationViewBoundsMode::UseVisible);
 	this->Loaded += ref new Windows::UI::Xaml::RoutedEventHandler(this, &HostSettingsPage::OnLoaded);
 	this->Unloaded += ref new Windows::UI::Xaml::RoutedEventHandler(this, &HostSettingsPage::OnUnloaded);
@@ -39,9 +42,14 @@ HostSettingsPage::HostSettingsPage()
 void HostSettingsPage::OnNavigatedTo(Windows::UI::Xaml::Navigation::NavigationEventArgs^ e) {
 	MoonlightHost^ mhost = dynamic_cast<MoonlightHost^>(e->Parameter);
 	if (mhost == nullptr)return;
+	Utils::Log("[HostSettings] OnNavigatedTo: begin\n");
 	GAMING_DEVICE_MODEL_INFORMATION info = {};
 	GetGamingDeviceModelInformation(&info);
 	host = mhost;
+	if (host->Resolution == nullptr) {
+		Utils::Log("[HostSettings] Resolution was null; defaulting to 1280x720\n");
+		host->Resolution = ref new ScreenResolution(1280, 720);
+	}
 	AvailableResolutions->Append(ref new ScreenResolution(1280, 720));
 	AvailableResolutions->Append(ref new ScreenResolution(1920, 1080));
 	//No 4K for Old Xbox One
@@ -190,6 +198,8 @@ void HostSettingsPage::OnNavigatedTo(Windows::UI::Xaml::Navigation::NavigationEv
 			XboxOneGraphsNote->Visibility = Windows::UI::Xaml::Visibility::Collapsed;
 		}
 	}
+
+	Utils::Log("[HostSettings] OnNavigatedTo: end (page populated)\n");
 }
 
 void HostSettingsPage::backButton_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ e)
@@ -211,7 +221,12 @@ void HostSettingsPage::OnBackRequested(Platform::Object^ e, Windows::UI::Core::B
 
 void HostSettingsPage::ResolutionSelector_SelectionChanged(Platform::Object^ sender, Windows::UI::Xaml::Controls::SelectionChangedEventArgs^ e)
 {
-	auto selectedResolution = AvailableResolutions->GetAt(this->ResolutionSelector->SelectedIndex);
+	// ComboBox raises SelectionChanged with SelectedIndex == -1 while the
+	// ItemsSource is being populated on 15254; GetAt(-1) throws E_BOUNDS.
+	if (host == nullptr) return;
+	int idx = this->ResolutionSelector->SelectedIndex;
+	if (idx < 0 || idx >= (int)AvailableResolutions->Size) return;
+	auto selectedResolution = AvailableResolutions->GetAt(idx);
 
 	// Default to a new bitrate if a new resolution was chosen
 	if (selectedResolution->Width != host->Resolution->Width) {
@@ -223,7 +238,7 @@ void HostSettingsPage::ResolutionSelector_SelectionChanged(Platform::Object^ sen
 
 void HostSettingsPage::FPSSelector_SelectionChanged(Platform::Object^ sender, Windows::UI::Xaml::Controls::SelectionChangedEventArgs^ e)
 {
-	if (e->AddedItems->Size == 0) return;
+	if (host == nullptr || e->AddedItems->Size == 0) return;
 	int selectedFPS = (int)e->AddedItems->GetAt(0);
 
 	// Default to a new bitrate if a new FPS was chosen
@@ -236,6 +251,7 @@ void HostSettingsPage::FPSSelector_SelectionChanged(Platform::Object^ sender, Wi
 
 void HostSettingsPage::AutoStartSelector_SelectionChanged(Platform::Object^ sender, Windows::UI::Xaml::Controls::SelectionChangedEventArgs^ e)
 {
+	if (host == nullptr) return;
 	int index = AutoStartSelector->SelectedIndex - 1;
 	if (index >= 0 && host->Apps->Size > index) {
 		host->AutostartID = host->Apps->GetAt(index)->Id;
@@ -247,7 +263,10 @@ void HostSettingsPage::AutoStartSelector_SelectionChanged(Platform::Object^ send
 
 void HostSettingsPage::FramePacing_SelectionChanged(Platform::Object^ sender, Windows::UI::Xaml::Controls::SelectionChangedEventArgs^ e)
 {
-	auto selectedFramePacing = AvailableFramePacing->GetAt(this->FramePacingComboBox->SelectedIndex);
+	if (host == nullptr) return;
+	int idx = this->FramePacingComboBox->SelectedIndex;
+	if (idx < 0 || idx >= (int)AvailableFramePacing->Size) return;
+	auto selectedFramePacing = AvailableFramePacing->GetAt(idx);
 
 	if (selectedFramePacing == "Immediate") {
 		FramePacingImmediateDesc->Visibility = Windows::UI::Xaml::Visibility::Visible;
@@ -291,7 +310,7 @@ void HostSettingsPage::OnLoaded(Platform::Object^ sender, Windows::UI::Xaml::Rou
 
 void HostSettingsPage::CodecComboBox_SelectionChanged(Platform::Object^ sender, Windows::UI::Xaml::Controls::SelectionChangedEventArgs^ e)
 {
-	if (e->AddedItems->Size == 0) return;
+	if (host == nullptr || e->AddedItems->Size == 0) return;
 	auto selectedCodec = (Platform::String^)e->AddedItems->GetAt(0);
 
 	if (selectedCodec != host->VideoCodec) {
