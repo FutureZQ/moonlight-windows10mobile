@@ -1,4 +1,4 @@
-﻿<Page
+<Page
     x:Class="moonlight_xbox_dx.StreamPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -31,7 +31,7 @@
                                 <FontIcon Glyph="&#xE962;" />
                             </MenuFlyoutItem.Icon>
                         </MenuFlyoutItem>
-                        <MenuFlyoutItem x:Name="showKeyboardButton" Text="Show Keyboard" Click="showKeyboardButton_Click" AllowFocusOnInteraction="false" FocusVisualSecondaryThickness="0.5" >
+                        <MenuFlyoutItem x:Name="showKeyboardButton" Text="{x:Bind ShowKeyboard, Mode=OneWay, Converter={StaticResource BoolToTextConverter}, ConverterParameter='Hide Keyboard|Show Keyboard'}" Click="showKeyboardButton_Click" AllowFocusOnInteraction="false" FocusVisualSecondaryThickness="0.5" >
                             <MenuFlyoutItem.Icon>
                                 <FontIcon Glyph="&#xE92E;" />
                             </MenuFlyoutItem.Icon>

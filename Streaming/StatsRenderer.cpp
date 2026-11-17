@@ -212,7 +212,13 @@ void StatsRenderer::CreateWindowSizeDependentResources() {
 		bottom = 234;
 	} else {
 		left = 10;
-		bottom = 234;
+		// 720-class displays (the W10M phone): at width/3 the text wraps at ~42
+		// columns, so the 13 stat lines need ~22 rows, but a 234 px window only
+		// holds 14. The console is a ring buffer, so the first rows - the Video and
+		// frame-rate lines - were being scrolled off the top. Use half the width
+		// (fewer wraps) and a taller window.
+		right = m_displayWidth / 2;
+		bottom = 352;
 	}
 
 #if defined(_DEBUG)

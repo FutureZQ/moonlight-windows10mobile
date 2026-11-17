@@ -76,6 +76,20 @@ namespace moonlight_xbox_dx
 		    }
 	    }
 
+	    // Drives the "Show/Hide Keyboard" label of the flyout item; the overlay is
+	    // toggled by showKeyboardButton_Click.
+	    property bool ShowKeyboard {
+		    bool get() {
+			    return m_showKeyboard;
+		    }
+		    void set(bool value) {
+			    if (m_showKeyboard != value) {
+				    m_showKeyboard = value;
+				    OnPropertyChanged("ShowKeyboard");
+			    }
+		    }
+	    }
+
 		void OnBackRequested(Platform::Object^ e, Windows::UI::Core::BackRequestedEventArgs^ args);
 		property ApplicationState^ State {
 			ApplicationState^ get() {
@@ -181,6 +195,7 @@ namespace moonlight_xbox_dx
 		StreamConfiguration^ configuration;
 		void toggleStatsButton_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ e);
 	    void SetShowStats(bool show);
+	    void SetShowKeyboard(bool show);
 		void disonnectButton_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ e);
 		void OnKeyDown(Windows::UI::Core::CoreWindow^ sender, Windows::UI::Core::KeyEventArgs^ args);
 		void OnKeyUp(Windows::UI::Core::CoreWindow^ sender, Windows::UI::Core::KeyEventArgs^ args);
@@ -222,6 +237,7 @@ namespace moonlight_xbox_dx
         bool m_mouseMode = false;
 	    bool m_showLogs = false;
 	    bool m_showStats = false;
+	    bool m_showKeyboard = false;
 	};
 }
 

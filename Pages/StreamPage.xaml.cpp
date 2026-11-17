@@ -1,4 +1,4 @@
-﻿//
+//
 // DirectXPage.xaml.cpp
 // Implementation of the DirectXPage class.
 //
@@ -63,13 +63,16 @@ StreamPage::~StreamPage()
 
 void StreamPage::OnBackRequested(Platform::Object^ e,Windows::UI::Core::BackRequestedEventArgs^ args)
 {
-	// UWP on Xbox One triggers a back request whenever the B
-	// button is pressed which can result in the app being
-	// suspended if unhandled. On the phone the hardware Back key
-	// lands here too: while streaming, back means disconnect and
-	// return to the host list.
+	// UWP on Xbox One triggers a back request whenever the B button is pressed, and
+	// on the phone the hardware Back key lands here too. That used to disconnect the
+	// stream and go back to the host list, which made an accidental Back press (or a
+	// nav-bar swipe) kill a running session.
+	//
+	// The exit flow is disabled: the request is still marked handled so the system
+	// does not suspend the app, but nothing else happens. Use the on-screen
+	// disconnect button to end the stream.
 	args->Handled = true;
-	disconnectAndCloseButton_Click(nullptr, nullptr);
+	// disconnectAndCloseButton_Click(nullptr, nullptr);
 }
 
 void StreamPage::Page_Loaded(Platform::Object ^ sender, Windows::UI::Xaml::RoutedEventArgs ^ e) {
@@ -286,17 +289,34 @@ void StreamPage::SetMouseMode(bool enabled)
 void StreamPage::showKeyboardButton_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ e)
 {
 	if (!m_main) return;
-	if (GetApplicationState()->EnableKeyboard) {
-		m_main->keyboardMode = true;
 
+	// Toggle. This used to only ever show the keyboard, so the overlay stayed on
+	// top of the stream with no way to dismiss it.
+	const bool show = !ShowKeyboard;
+	SetShowKeyboard(show);
+	m_main->keyboardMode = show;
+
+	auto inputPane = Windows::UI::ViewManagement::InputPane::GetForCurrentView();
+	if (GetApplicationState()->EnableKeyboard) {
+		auto that = this;
 		this->Dispatcher->RunAsync(
 			Windows::UI::Core::CoreDispatcherPriority::Normal,
-			ref new Windows::UI::Core::DispatchedHandler([this]() {
-				this->m_keyboardView->Visibility = Windows::UI::Xaml::Visibility::Visible;
+			ref new Windows::UI::Core::DispatchedHandler([that, show]() {
+				that->m_keyboardView->Visibility = show ? Windows::UI::Xaml::Visibility::Visible
+				                                        : Windows::UI::Xaml::Visibility::Collapsed;
 			}));
+		if (!show) {
+			inputPane->TryHide();
+		}
+	} else if (show) {
+		inputPane->TryShow();
 	} else {
-		Windows::UI::ViewManagement::InputPane::GetForCurrentView()->TryShow();
+		inputPane->TryHide();
 	}
+}
+
+void StreamPage::SetShowKeyboard(bool show) {
+	this->ShowKeyboard = show;
 }
 
 void StreamPage::toggleLogsButton_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ e)

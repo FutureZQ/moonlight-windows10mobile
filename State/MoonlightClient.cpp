@@ -1,4 +1,4 @@
-﻿#include "MoonlightClient.h"
+#include "MoonlightClient.h"
 #include "pch.h"
 
 extern "C" {
@@ -212,14 +212,15 @@ int MoonlightClient::StartStreaming(std::shared_ptr<DX::DeviceResources> res, St
 	LiInitializeStreamConfiguration(&config);
 	config.width = sConfig->width;
 	config.height = sConfig->height;
-	if (Utils::IsWindowsPhone()) {
-		// W10M: match the phone's native panel (720x1280 portrait => 1280x720
-		// landscape stream). Halves decode/render load versus the 1080p default
-		// and maps 1:1 onto the swap chain width.
+	// The resolution comes from the host settings page. The phone panel is 720p, but
+	// higher resolutions are kept selectable for faster devices, so nothing is forced
+	// here; a saved state without a resolution still falls back to 1280x720 via the
+	// page defaults.
+	if (config.width <= 0 || config.height <= 0) {
 		config.width = 1280;
 		config.height = 720;
-		Utils::Log("W10M: streaming resolution forced to 1280x720 (phone panel native)\n");
 	}
+	Utils::Logf("Streaming at %dx%d\n", config.width, config.height);
 	config.bitrate = sConfig->bitrate;
 	config.fps = sConfig->FPS;
 	if (res->GetRefreshRate() > 0.0 && IsXbox()) {
@@ -275,8 +276,8 @@ int MoonlightClient::StartStreaming(std::shared_ptr<DX::DeviceResources> res, St
 	// Advertised formats follow the user's codec selection. PyroWave is only
 	// offered when explicitly chosen (RTSP prefers it over everything on mutual
 	// capability, so always advertising it would force it on for any
-	// PyroWave-capable server); HEVC/H.264 stay advertised as fallback for
-	// servers without PyroWave support.
+	// PyroWave-capable server); H.264 stays advertised as the fallback for servers
+	// without PyroWave support.
 	bool pyrowave420 = sConfig->videoCodec == "PyroWave 4:2:0";
 	bool pyrowave444 = sConfig->videoCodec == "PyroWave 4:4:4";
 	bool wantHevc = sConfig->videoCodec != "H.264";
@@ -294,7 +295,7 @@ int MoonlightClient::StartStreaming(std::shared_ptr<DX::DeviceResources> res, St
 		// decoder cannot run there. The settings page hides PyroWave on these
 		// consoles; this catches a selection saved by another console, which must
 		// not be advertised or the stream would fail when the decoder rejects it.
-		Utils::Log("PyroWave codec selected but this console cannot run the decoder; advertising HEVC/H.264 instead\n");
+		Utils::Log("PyroWave codec selected but this console cannot run the decoder; advertising H.264 instead\n");
 		pyrowave420 = pyrowave444 = false;
 	}
 

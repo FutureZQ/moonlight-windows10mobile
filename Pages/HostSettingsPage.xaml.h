@@ -1,4 +1,4 @@
-﻿//
+//
 // HostSettingsPage.xaml.h
 // Declaration of the HostSettingsPage class
 //
@@ -126,6 +126,8 @@ namespace moonlight_xbox_dx
 		}
 
 	private:
+		void ApplySavedSelections();
+		void SetComboIndex(Windows::UI::Xaml::Controls::ComboBox^ combo, const char* what, int index);
 		void backButton_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ e);
 		void ResolutionSelector_SelectionChanged(Platform::Object^ sender, Windows::UI::Xaml::Controls::SelectionChangedEventArgs^ e);
 		void FPSSelector_SelectionChanged(Platform::Object^ sender, Windows::UI::Xaml::Controls::SelectionChangedEventArgs^ e);

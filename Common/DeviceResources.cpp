@@ -1,4 +1,4 @@
-﻿#include "pch.h"
+#include "pch.h"
 #include "DeviceResources.h"
 #include "DirectXHelper.h"
 #include <windows.ui.xaml.media.dxinterop.h>
@@ -621,6 +621,12 @@ void DX::DeviceResources::Present()
 	ZoneScoped;
 	int64_t beforePresentQpc = QpcNow();
 
+	// Experiment result (2026-11-12): DXGI_PRESENT_DO_NOT_WAIT is honoured on 15254
+	// (S_OK and DXGI_ERROR_WAS_STILL_DRAWING both observed), but it does NOT fix the
+	// freeze that happens while a Bluetooth device is connected: Present stopped
+	// blocking, yet the compositor stopped consuming the swapchain (~5 presents per
+	// 5 s) and audio stalled as well, with the device itself briefly unresponsive.
+	// Back to the plain blocking Present.
 	HRESULT hr = m_swapChain->Present(0, 0);
 
 	if (hr == S_OK) {
@@ -707,6 +713,14 @@ double DX::DeviceResources::GetUWPRefreshRate()
 	if (IsXbox()) {
 		refreshRate = HdmiDisplayInformation::GetForCurrentView()->GetCurrentDisplayMode()->RefreshRate;
 	}
+	else if (Utils::IsWindowsPhone()) {
+		// W10M has no refresh-rate query (HdmiDisplayInformation is Xbox-only) and the
+		// compositor plus the panel run at 60 Hz. Assuming the desktop default of 120
+		// made the pacer aim at half-vsync deadlines and present twice per vblank,
+		// which grew the present-to-display backlog and inflated the 'present' delay
+		// in the stats overlay.
+		refreshRate = 60.0;
+	}
 	else {
 		// It seems difficult to get the refresh rate in Windows, TODO
 		refreshRate = 120.0;
@@ -723,19 +737,11 @@ void DX::DeviceResources::ImGui_Init(const ComPtr<ISwapChainPanelNative>& panelN
 		ImGuiIO& io = ImGui::GetIO();
 
 		float fontPx = m_pixelHeight == 2160 ? 36.0f : 18.0f;
+		// Windows Mobile cannot read C:\Windows\Fonts from a packaged app, so on the
+		// phone this fails and the built-in ImGui font below is used. The bundled copy
+		// of Segoe UI was removed on purpose: it is a Microsoft font and cannot be
+		// redistributed with the repository.
 		ImFont* imguiFont = io.Fonts->AddFontFromFileTTF("c:\\Windows\\Fonts\\segoeui.ttf", fontPx);
-		if (!imguiFont) {
-			// W10M: C:\\Windows\\Fonts is not readable from a UWP app; load the
-			// copy bundled in Assets instead. AddFontFromMemoryTTF takes ownership
-			// of the buffer, so hand it a malloc copy, not vector data.
-			auto fontData = DX::ReadData(L"Assets\\Fonts\\segoeui.ttf");
-			if (!fontData.empty()) {
-				void* fontBuf = malloc(fontData.size());
-				memcpy(fontBuf, fontData.data(), fontData.size());
-				imguiFont = io.Fonts->AddFontFromMemoryTTF(fontBuf, static_cast<int>(fontData.size()), fontPx);
-				Utils::Logf("ImGui font from Assets: %s (%d bytes)\n", imguiFont ? "ok" : "FAILED", (int)fontData.size());
-			}
-		}
 		if (!imguiFont) {
 			Utils::Log("ImGui: falling back to default font\n");
 			io.Fonts->AddFontDefault();

@@ -1,9 +1,10 @@
-﻿#include "moonlight_xbox_dxMain.h"
+#include "moonlight_xbox_dxMain.h"
 #include "pch.h"
 #include <Pages/AppPage.xaml.h>
 #include <Pages/HostSelectorPage.xaml.h>
 #include <Pages/StreamPage.xaml.h>
 #include <Streaming\FFMpegDecoder.h>
+#include <Streaming\FrameQueue.h>
 #include "../Plot/ImGuiPlots.h"
 #include "Common\DirectXHelper.h"
 #include "State\GamepadState.h"
@@ -288,7 +289,15 @@ void moonlight_xbox_dxMain::StartRenderLoop() {
 				}
 
 				// Whether we rendered a new frame or not, wait until vblank for pacing
-				// This is out of the lock and won't block the decoder
+				// This is out of the lock and won't block the decoder.
+				//
+				// Do NOT try to compensate for the Present() block here. Presenting
+				// "one Present cost early" (deadline - ~16 ms) made the loop present
+				// ~52 times/s while the compositor flips at 60 Hz: the 2-buffer flip
+				// chain then overwrites frames that were never displayed, which showed up
+				// as visible judder (cursor jumps, video stutter) even though the stats
+				// looked healthy (queue ~0.5 ms, jitter 0%). Waiting for the vblank is the
+				// smooth option on this platform, at the cost of ~1 frame per 2 vblanks.
 				bool hitDeadline = Pacer::instance().waitBeforePresent(deadline);
 				t3 = QpcNow();
 
@@ -303,7 +312,10 @@ void moonlight_xbox_dxMain::StartRenderLoop() {
 				{
 					ZoneScopedNC("Present", tracy::Color::Purple);
 
-					// lock is required around Present
+					// Present must stay under the ffmpeg device lock. Without it the
+					// composition swapchain deadlocked: the log shows GetLastPresentCount
+					// frozen for tens of seconds while the pacer thread kept running, then
+					// the control stream died and the UI looped on the error dialog.
 					auto guard = FFMpegDecoder::Lock();
 					m_deviceResources->Present();
 					FrameMark;
@@ -575,6 +587,7 @@ static bool UpdateScroll(GamepadState &state, double stickX, double stickY,
 void moonlight_xbox_dxMain::ProcessInput(int64_t now) {
 	auto gamepads = Windows::Gaming::Input::Gamepad::Gamepads;
 	uint16_t gamepadCount = gamepads->Size;
+
 	moonlightClient->SetGamepadCount(gamepadCount);
 
 	for (UINT i = 0; i < gamepadCount; i++) {

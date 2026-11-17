@@ -29,10 +29,7 @@ using namespace Windows::UI::Xaml::Navigation;
 
 HostSettingsPage::HostSettingsPage()
 {
-	// Logged before InitializeComponent so a XAML-load crash still leaves a trace.
-	Utils::Log("[HostSettings] ctor: begin (before InitializeComponent)\n");
 	InitializeComponent();
-	Utils::Log("[HostSettings] ctor: InitializeComponent ok\n");
 	Windows::UI::ViewManagement::ApplicationView::GetForCurrentView()->SetDesiredBoundsMode(Windows::UI::ViewManagement::ApplicationViewBoundsMode::UseVisible);
 	this->Loaded += ref new Windows::UI::Xaml::RoutedEventHandler(this, &HostSettingsPage::OnLoaded);
 	this->Unloaded += ref new Windows::UI::Xaml::RoutedEventHandler(this, &HostSettingsPage::OnUnloaded);
@@ -42,12 +39,10 @@ HostSettingsPage::HostSettingsPage()
 void HostSettingsPage::OnNavigatedTo(Windows::UI::Xaml::Navigation::NavigationEventArgs^ e) {
 	MoonlightHost^ mhost = dynamic_cast<MoonlightHost^>(e->Parameter);
 	if (mhost == nullptr)return;
-	Utils::Log("[HostSettings] OnNavigatedTo: begin\n");
 	GAMING_DEVICE_MODEL_INFORMATION info = {};
 	GetGamingDeviceModelInformation(&info);
 	host = mhost;
 	if (host->Resolution == nullptr) {
-		Utils::Log("[HostSettings] Resolution was null; defaulting to 1280x720\n");
 		host->Resolution = ref new ScreenResolution(1280, 720);
 	}
 	AvailableResolutions->Append(ref new ScreenResolution(1280, 720));
@@ -71,8 +66,8 @@ void HostSettingsPage::OnNavigatedTo(Windows::UI::Xaml::Navigation::NavigationEv
 			AvailableVideoCodecs->Append("PyroWave 4:4:4");
 		}
 	}
-	// If the saved codec is no longer offered (e.g. PyroWave selected but the
-	// server lost support), fall back so the ComboBox isn't blank.
+	// Saved values may no longer be offered (other device, server lost a codec); fall
+	// back to a supported default so no ComboBox is left blank.
 	{
 		bool codecAvailable = false;
 		for (unsigned int i = 0; i < AvailableVideoCodecs->Size; i++) {
@@ -82,21 +77,53 @@ void HostSettingsPage::OnNavigatedTo(Windows::UI::Xaml::Navigation::NavigationEv
 			}
 		}
 		if (!codecAvailable) {
-			host->VideoCodec = "HEVC (H.265)";
+			host->VideoCodec = "H.264";
+		}
+		bool fpsAvailable = false;
+		for (unsigned int i = 0; i < AvailableFPS->Size; i++) {
+			if (AvailableFPS->GetAt(i) == host->FPS) {
+				fpsAvailable = true;
+				break;
+			}
+		}
+		if (!fpsAvailable) {
+			host->FPS = 60;
 		}
 	}
 	AvailableAudioConfigs->Append("Stereo");
 	AvailableAudioConfigs->Append("Surround 5.1");
 	AvailableAudioConfigs->Append("Surround 7.1");
+	{
+		bool audioConfigAvailable = false;
+		for (unsigned int i = 0; i < AvailableAudioConfigs->Size; i++) {
+			if (AvailableAudioConfigs->GetAt(i) == host->AudioConfig) {
+				audioConfigAvailable = true;
+				break;
+			}
+		}
+		if (!audioConfigAvailable) {
+			host->AudioConfig = "Stereo";
+		}
+	}
 	AvailableFramePacing->Append("Immediate");
 	AvailableFramePacing->Append("Display-locked");
+	if (host->FramePacing == nullptr || host->FramePacing->IsEmpty()) {
+		host->FramePacing = "Immediate";
+	}
 	CurrentResolutionIndex = 0;
-	for (int i = 0; i < AvailableResolutions->Size; i++) {
-		if (host->Resolution->Width == AvailableResolutions->GetAt(i)->Width &&
-			host->Resolution->Height == AvailableResolutions->GetAt(i)->Height
-			) {
-			CurrentResolutionIndex = i;
-			break;
+	{
+		bool resolutionMatched = false;
+		for (int i = 0; i < (int)AvailableResolutions->Size; i++) {
+			if (host->Resolution->Width == AvailableResolutions->GetAt(i)->Width &&
+			    host->Resolution->Height == AvailableResolutions->GetAt(i)->Height) {
+				CurrentResolutionIndex = i;
+				resolutionMatched = true;
+				break;
+			}
+		}
+		if (!resolutionMatched) {
+			// 720p is the panel-native default.
+			host->Resolution = AvailableResolutions->GetAt(0);
 		}
 	}
 	CurrentAppIndex = 0;
@@ -113,13 +140,10 @@ void HostSettingsPage::OnNavigatedTo(Windows::UI::Xaml::Navigation::NavigationEv
 	}
 	AutoStartSelector->SelectedIndex = CurrentAppIndex;
 
-	// Set frame pacing selection based on saved preference
-	for (int i = 0; i < AvailableFramePacing->Size; i++) {
-		if (host->FramePacing == AvailableFramePacing->GetAt(i)) {
-			FramePacingComboBox->SelectedIndex = i;
-			break;
-		}
-	}
+	// The saved frame pacing / audio buffer / packet size selections are applied
+	// in OnLoaded, not here: on 15254 a ComboBox whose ItemsSource was just set
+	// still has an empty Items collection while OnNavigatedTo runs, and assigning
+	// SelectedIndex to it throws E_INVALIDARG straight out of the projection.
 
 	// Audio Buffer options
 	AvailableAudioBuffers->Append("10 ms");
@@ -127,20 +151,23 @@ void HostSettingsPage::OnNavigatedTo(Windows::UI::Xaml::Navigation::NavigationEv
 	AvailableAudioBuffers->Append("30 ms");
 	AvailableAudioBuffers->Append("40 ms");
 	AvailableAudioBuffers->Append("50 ms");
-	for (int i = 0; i < AvailableAudioBuffers->Size; i++) {
-		if (host->AudioBuffer == AvailableAudioBuffers->GetAt(i)) {
-			AudioBuffersComboBox->SelectedIndex = i;
-			break;
+	{
+		bool audioBufferAvailable = false;
+		for (unsigned int i = 0; i < AvailableAudioBuffers->Size; i++) {
+			if (AvailableAudioBuffers->GetAt(i) == host->AudioBuffer) {
+				audioBufferAvailable = true;
+				break;
+			}
+		}
+		if (!audioBufferAvailable) {
+			host->AudioBuffer = "30 ms";
 		}
 	}
 
 	AvailablePacketSizes->Append(1392);
 	AvailablePacketSizes->Append(1024);
-	for (int i = 0; i < AvailablePacketSizes->Size; i++) {
-		if (host->PacketSize == AvailablePacketSizes->GetAt(i)) {
-			PacketSizeSelector->SelectedIndex = i;
-			break;
-		}
+	if (host->PacketSize != 1392 && host->PacketSize != 1024) {
+		host->PacketSize = 1392;
 	}
 
 	if (info.vendorId == GAMING_DEVICE_VENDOR_ID_MICROSOFT) {
@@ -199,7 +226,6 @@ void HostSettingsPage::OnNavigatedTo(Windows::UI::Xaml::Navigation::NavigationEv
 		}
 	}
 
-	Utils::Log("[HostSettings] OnNavigatedTo: end (page populated)\n");
 }
 
 void HostSettingsPage::backButton_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ e)
@@ -306,6 +332,96 @@ void HostSettingsPage::OnLoaded(Platform::Object^ sender, Windows::UI::Xaml::Rou
 {
 	auto navigation = Windows::UI::Core::SystemNavigationManager::GetForCurrentView();
 	m_back_cookie = navigation->BackRequested += ref new EventHandler<BackRequestedEventArgs^>(this, &HostSettingsPage::OnBackRequested);
+
+	// See OnNavigatedTo: ItemsSource-bound ComboBoxes can only be indexed once
+	// the page tree is live.
+	ApplySavedSelections();
+}
+
+void HostSettingsPage::SetComboIndex(Windows::UI::Xaml::Controls::ComboBox^ combo, const char* what, int index)
+{
+	(void)what; // only used by the removed diagnostic log
+	if (combo == nullptr) {
+		return;
+	}
+	int realized = (int)combo->Items->Size;
+	// A rejected index is what turned this page into a crash: 0x80070057 out of
+	// ComboBox.SelectedIndex is unhandled and terminates the process.
+	if (index < 0 || index >= realized) {
+		return;
+	}
+	combo->SelectedIndex = index;
+}
+
+void HostSettingsPage::ApplySavedSelections()
+{
+	if (host == nullptr) {
+		return;
+	}
+
+	try {
+		// The resolution combo used to get its index from an x:Bind SelectedIndex
+		// (TwoWay) on CurrentResolutionIndex. x:Bind pushes that value from
+		// XamlBindings::Loading, which is exactly the window where the
+		// ItemsSource-bound Items collection is still empty on 15254, so the
+		// generated setter died with E_INVALIDARG. Apply it here instead.
+		if (host->Resolution != nullptr) {
+			for (int i = 0; i < (int)AvailableResolutions->Size; i++) {
+				auto res = AvailableResolutions->GetAt(i);
+				if (host->Resolution->Width == res->Width && host->Resolution->Height == res->Height) {
+					SetComboIndex(ResolutionSelector, "resolution", i);
+					break;
+				}
+			}
+		}
+
+		for (int i = 0; i < (int)AvailableFramePacing->Size; i++) {
+			if (host->FramePacing == AvailableFramePacing->GetAt(i)) {
+				SetComboIndex(FramePacingComboBox, "framePacing", i);
+				break;
+			}
+		}
+
+		for (int i = 0; i < (int)AvailableAudioBuffers->Size; i++) {
+			if (host->AudioBuffer == AvailableAudioBuffers->GetAt(i)) {
+				SetComboIndex(AudioBuffersComboBox, "audioBuffer", i);
+				break;
+			}
+		}
+
+		for (int i = 0; i < (int)AvailablePacketSizes->Size; i++) {
+			if (host->PacketSize == AvailablePacketSizes->GetAt(i)) {
+				SetComboIndex(PacketSizeSelector, "packetSize", i);
+				break;
+			}
+		}
+
+		// These three used to rely on an x:Bind SelectedItem that was evaluated while
+		// the ComboBox had no Items yet, which left them visibly blank. Their lists are
+		// fully populated now, so select by value after the page is live.
+		for (int i = 0; i < (int)AvailableFPS->Size; i++) {
+			if (AvailableFPS->GetAt(i) == host->FPS) {
+				SetComboIndex(FPSSelector, "fps", i);
+				break;
+			}
+		}
+
+		for (int i = 0; i < (int)AvailableVideoCodecs->Size; i++) {
+			if (AvailableVideoCodecs->GetAt(i) == host->VideoCodec) {
+				SetComboIndex(CodecComboBox, "codec", i);
+				break;
+			}
+		}
+
+		for (int i = 0; i < (int)AvailableAudioConfigs->Size; i++) {
+			if (AvailableAudioConfigs->GetAt(i) == host->AudioConfig) {
+				SetComboIndex(AudioConfigComboBox, "audioConfig", i);
+				break;
+			}
+		}
+	}
+	catch (Platform::Exception^) {
+	}
 }
 
 void HostSettingsPage::CodecComboBox_SelectionChanged(Platform::Object^ sender, Windows::UI::Xaml::Controls::SelectionChangedEventArgs^ e)

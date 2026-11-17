@@ -352,3 +352,6 @@ vcpkg_installed
 # W10M local build output
 build-tmp/
 build-logs/
+
+# Internal porting notes stay local; they are not part of the shipped project
+docs/
